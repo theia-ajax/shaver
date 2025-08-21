@@ -1,0 +1,117 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(Windows MSVC) Build & Run Debug",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${config:game_target}/bin/win64/debug/${config:game_target}.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "externalTerminal",
+            "preLaunchTask": "MSVC Build Debug"
+        },
+        {
+            "name": "(Windows MSVC) Build & Run Release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${config:game_target}/bin/win64/release/${config:game_target}.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "MSVC Build Release"
+        },
+        {
+            "name": "(Windows MSVC) Run Debug",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${config:game_target}/bin/win64/debug/${config:game_target}.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "externalTerminal",
+        },
+        {
+            "name": "(Windows MSVC) Run Release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${config:game_target}/bin/win64/release/${config:game_target}.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": []
+        },
+        {
+            "name": "(GCC) Build & Run Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "cwd": "${workspaceRoot}",
+            "stopAtEntry": false,
+            "preLaunchTask": "(GCC) Build Debug",
+            "visualizerFile": "${workspaceRoot}/CustomTypes.natvis",
+            "showDisplayString": true,
+            "linux": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/linux64/debug/${config:game_target}",
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb"
+            },
+            "windows": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/win64/debug/${config:game_target}",
+                "MIMode":"gdb",
+                "miDebuggerPath": "gdb.exe",
+            }
+        },
+        {
+            "name": "(GCC) Build & Run Release",
+            "type": "cppdbg",
+            "request": "launch",
+            "linux": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/linux64/release/${config:game_target}",
+            },
+            "windows": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/win64/release/${config:game_target}",
+            },
+            "cwd": "${workspaceRoot}",
+            "stopAtEntry": false,
+            "preLaunchTask": "(GCC) Build Release",
+        },
+        {
+            "name": "(GCC) Run Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "cwd": "${workspaceRoot}",
+            "stopAtEntry": false,
+            "visualizerFile": "${workspaceFolder}/CustomTypes.natvis",
+            "showDisplayString": true,
+            "linux": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/linux64/debug/${config:game_target}",
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb"
+            },
+            "windows": {
+                "preLaunchTask": "Copy Debug DLLs",
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/win64/debug/${config:game_target}",
+                "MIMode": "gdb",
+                "miDebuggerPath": "gdb.exe"
+            }
+        },
+        {
+            "name": "(GCC) Run Release",
+            "type": "cppdbg",
+            "request": "launch",
+            "linux": {
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/linux64/release/${config:game_target}",
+            },
+            "windows": {
+                "preLaunchTask": "Copy Release DLLs",
+                "program": "${workspaceRoot}/bin/${config:game_target}/bin/win64/release/${config:game_target}",
+            },
+            "cwd": "${workspaceRoot}",
+            "stopAtEntry": false,
+        }
+    ]
+}
