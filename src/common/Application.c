@@ -3,8 +3,110 @@
 #include <SDL3/SDL.h>
 #include <sokol_time.h>
 #include <stb_ds.h>
+#include <stb_image.h>
 
+#include "Debug.h"
 #include "Log.h"
+#include "Math2D.h"
+
+float32 InterpFuncLinear(float32 A, float32 B, float32 Time, float32 Duration)
+{
+	return (B - A) * (Time / Duration) + A;
+}
+
+float32 InterpFuncEaseInQuad(float32 A, float32 B, float32 Time, float32 Duration)
+{
+	return (B - A) * (Time /= Duration) * Time + B;
+}
+
+float32 InterpFuncEaseOutQuad(float32 A, float32 B, float32 Time, float32 Duration)
+{
+	return (B - A) * (Time /= Duration) * (Time - 2) + B;
+}
+
+float32 InterpFuncEaseInOutQuad(float32 A, float32 B, float32 Time, float32 Duration)
+{
+	Time /= (Duration / 2.0f);
+	if (Time < 1) {
+		return (B - A) / 2 * Time * Time + A;
+	} else {
+		Time -= 1.0f;
+		return -(B - A) / 2 * (Time * (Time - 2) - 1) + A;
+	}
+}
+
+// f32 tween_linear(f32 t, f32 i, f32 f, f32 d) {
+//     return (f - i) * t / d + i;
+// }
+
+// f32 tween_ease_in_quad(f32 t, f32 i, f32 f, f32 d) {
+//     t /= d;
+//     return (f - i) * t * t + i;
+// }
+
+// f32 tween_ease_out_quad(f32 t, f32 i, f32 f, f32 d) {
+//     t /= d;
+//     return -(f - i) * (t - 2.f) + i;
+// }
+
+// f32 tween_ease_in_out_quad(f32 t, f32 i, f32 f, f32 d) {
+//     t /= (d / 2.f);
+//     if (t < 1.f) {
+//         return (f - i) / 2.f * t * t + i;
+//     }
+//     t -= 1.f;
+//     return -(f - i) / 2 * (t * (t - 2) - 1) + i;
+// }
+
+enum InterpolatorFlags {
+	InterpolatorFlags_None = 0,
+	InterpolatorFlags_Destroy = 1 << 0,
+};
+
+typedef struct ShaverApplication ShaverApplication;
+typedef struct Interpolator Interpolator;
+
+typedef float32 (*InterpolatorFunction)(float32, float32, float32, float32);
+typedef void (*InterpolatorOnFinish)(ShaverApplication*, Interpolator*);
+
+typedef struct Interpolator {
+	int64 Id;
+	InterpolatorFunction Function;
+	InterpolatorOnFinish OnFinish;
+	float32 Time;
+	float32 Duration;
+	float32 Start;
+	float32 Final;
+	float32 TimeScale;
+	uint32 Flags;
+} Interpolator;
+
+typedef struct ShaverRazor {
+	SDL_Surface* Image;
+	SDL_Rect BladeBounds;
+} ShaverRazor;
+
+enum RazorBehavior {
+	RazorBehavior_Idle,
+	RazorBehavior_Reposition,
+	RazorBehavior_WaitToShave,
+	RazorBehavior_Shave,
+	RazorBehavior_WaitToReposition,
+	RazorBehavior_Done,
+	RazorBehavior_Count,
+};
+
+const char* RazorBehaviorNames[RazorBehavior_Count] =
+	{"Idle", "Reposition", "WaitToShave", "Shave", "WaitToReposition", "Done,"};
+
+typedef struct RazorState {
+	int64 InterpolatorId;
+	Vec2 StartPosition;
+	Vec2 TargetPosition;
+	Vec2 Position;
+	int32 Behavior;
+	int32 ShaveIndex;
+} RazorState;
 
 typedef struct ShaverDisplay {
 	SDL_DisplayID DisplayID;
@@ -13,11 +115,19 @@ typedef struct ShaverDisplay {
 	SDL_Renderer* Renderer;
 	SDL_Rect Bounds;
 	SDL_Texture* ScreenshotTexture;
+	SDL_Texture* RazorTexture;
+	RazorState Razor;
+	int32 WindowWidth;
+	int32 WindowHeight;
 } ShaverDisplay;
 
 typedef struct ShaverApplication {
 	ShaverDisplay* Displays;
 	SDL_Surface* Screenshot;
+	Interpolator* Interpolators;
+	int64 NextInterpolatorId;
+	ShaverRazor Razor;
+	bool RequestShutdown;
 	bool EnableConfusionPrevention; // When true make it obvious that the screen saver is running so I don't get
 									// confused while deving
 } ShaverApplication;
@@ -37,7 +147,38 @@ void ApplicationDestroy(ShaverApplication* App);
 void ApplicationCreateDisplays(ShaverApplication* App);
 void ApplicationUpdate(ShaverApplication* App, const GameTime* Time);
 void ApplicationRender(ShaverApplication* App);
+bool ApplicationIsRunning(ShaverApplication* App);
+void ApplicationStopRunning(ShaverApplication* App);
 bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event);
+
+int64 CreateInterpolator(
+	ShaverApplication* App,
+	InterpolatorFunction Func,
+	float32 Start,
+	float32 Final,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish);
+Interpolator* GetInterpolator(const ShaverApplication* App, int64 Id);
+float32 EvalInterpolator(Interpolator* Interp);
+
+void RazorSetPosition(RazorState* Razor, Vec2 Position);
+void RazorWait(ShaverApplication* App, RazorState* Razor, float32 Duration, InterpolatorOnFinish OnFinish);
+void RazorMoveTo(
+	ShaverApplication* App,
+	RazorState* Razor,
+	Vec2 TargetPosition,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish);
+void RazorEaseTo(
+	ShaverApplication* App,
+	RazorState* Razor,
+	Vec2 TargetPosition,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish);
+Vec2 GetRazorCenterDisplayPosition(const ShaverApplication* App, const ShaverDisplay* Display);
+float32 RazorEvaluatePosition(const ShaverApplication* App, RazorState* Razor);
+
+bool LoadImage(const char* FileName, SDL_Surface** OutSurface);
 
 Application* ApplicationInitialize(const ApplicationConfig* Config)
 {
@@ -62,17 +203,33 @@ Application* ApplicationInitialize(const ApplicationConfig* Config)
 
 	ShaverApplication* App = ApplicationCreate();
 	ApplicationTakeDesktopScreenshot(&App->Screenshot);
+
+	if (LoadImage("assets/razor.png", &App->Razor.Image)) {
+		App->Razor.BladeBounds = (SDL_Rect){0, 0, 256, 96};
+	} else {
+		LogError("Failed to load razor image.");
+		ApplicationStopRunning(App);
+	}
+
 	ApplicationCreateDisplays(App);
 
 #ifdef _DEBUG
 	App->EnableConfusionPrevention = true;
 #endif
 
+	DebugInitialize(&(DebugConfig){
+		.CanvasWidth = 800,
+		.CanvasHeight = 600,
+		.BackgroundColor = SDL_MapRGBA(SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32), NULL, 32, 32, 32, 196),
+		.ForegroundColor = SDL_MapRGBA(SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32), NULL, 200, 255, 255, 255),
+	});
+
 	return (Application*)App;
 }
 
 void ApplicationShutdown(Application* App)
 {
+	DebugShutdown();
 	ApplicationDestroy((ShaverApplication*)App);
 	LoggingShutdown();
 	SDL_Quit();
@@ -90,15 +247,13 @@ void ApplicationRun(Application* App)
 	uint64 RenderTimeTicks = 0;
 	double ElapsedSeconds = 0.0;
 
-	bool IsRunning = true;
-
-	while (IsRunning) {
+	while (ApplicationIsRunning(_App)) {
 		uint64 FrameStartTicks = stm_now();
 
 		SDL_Event Event;
 		while (SDL_PollEvent(&Event)) {
 			if (ApplicationEventShouldExit(_App, &Event)) {
-				IsRunning = false;
+				ApplicationStopRunning(_App);
 			}
 		}
 
@@ -152,6 +307,67 @@ void ApplicationDestroy(ShaverApplication* App)
 	SDL_free(App);
 }
 
+void RazorMoveFinished(ShaverApplication* App, Interpolator* Interp)
+{
+	ShaverDisplay* RazorDisplay = NULL;
+	RazorState* Razor = NULL;
+	for (int DisplayIndex = 0; DisplayIndex < arrlen(App->Displays); DisplayIndex++) {
+		ShaverDisplay* Display = &App->Displays[DisplayIndex];
+		if (Display->Razor.InterpolatorId == Interp->Id) {
+			RazorDisplay = Display;
+			break;
+		}
+	}
+
+	if (RazorDisplay == NULL) {
+		return;
+	}
+
+	Razor = &RazorDisplay->Razor;
+
+	RazorEvaluatePosition(App, Razor);
+
+	const float32 IdleDuration = 2.0f;
+	const float32 RepositionDuration = 1.0f;
+	const float32 ShaveDuration = 2.0f;
+	const float32 WaitToShaveDuration = 0.5f;
+	const float32 WaitToRepositionDuration = 0.75f;
+
+	switch (Razor->Behavior) {
+		case RazorBehavior_Idle:
+			Razor->Behavior = RazorBehavior_Reposition;
+			RazorEaseTo(App, Razor, V2(0, 0), IdleDuration, RazorMoveFinished);
+			break;
+
+		case RazorBehavior_Reposition:
+			Razor->Behavior = RazorBehavior_WaitToShave;
+			RazorWait(App, Razor, WaitToShaveDuration, RazorMoveFinished);
+			break;
+
+		case RazorBehavior_WaitToShave:
+			Razor->Behavior = RazorBehavior_Shave;
+			RazorMoveTo(App, Razor, V2(Razor->Position.X, RazorDisplay->WindowHeight), ShaveDuration, RazorMoveFinished);
+			break;
+
+		case RazorBehavior_Shave:
+			Razor->Behavior = RazorBehavior_WaitToReposition;
+			RazorWait(App, Razor, WaitToRepositionDuration, RazorMoveFinished);
+			break;
+
+		case RazorBehavior_WaitToReposition:
+			Razor->ShaveIndex++;
+			float32 NextX = Razor->ShaveIndex * App->Razor.BladeBounds.w;
+
+			if (NextX < RazorDisplay->WindowWidth) {
+				Razor->Behavior = RazorBehavior_Reposition;
+				RazorEaseTo(App, Razor, V2(NextX, 0), RepositionDuration, RazorMoveFinished);
+			} else {
+				RazorEaseTo(App, Razor, GetRazorCenterDisplayPosition(App, RazorDisplay), 1.0f, NULL);
+			}
+			break;
+	}
+}
+
 void ApplicationCreateDisplays(ShaverApplication* App)
 {
 	int DisplayCount = 0;
@@ -177,10 +393,11 @@ void ApplicationCreateDisplays(ShaverApplication* App)
 
 		SDL_Rect Bounds;
 		SDL_GetDisplayBounds(DisplayID, &Bounds);
-		// SDL_SetWindowFullscreen(Window, true);
-		// SDL_SetWindowFullscreenMode(Window, DisplayMode);
 		SDL_SetWindowPosition(Window, Bounds.x, Bounds.y);
 		SDL_SetWindowFullscreen(Window, true);
+
+		int WindowWidth, WindowHeight;
+		SDL_GetWindowSizeInPixels(Window, &WindowWidth, &WindowHeight);
 
 		arrput(
 			App->Displays,
@@ -191,12 +408,60 @@ void ApplicationCreateDisplays(ShaverApplication* App)
 				.Renderer = Renderer,
 				.Bounds = Bounds,
 				.ScreenshotTexture = SDL_CreateTextureFromSurface(Renderer, App->Screenshot),
+				.RazorTexture = SDL_CreateTextureFromSurface(Renderer, App->Razor.Image),
+				.WindowWidth = WindowWidth,
+				.WindowHeight = WindowHeight,
 			}));
+
+		RazorState* Razor = &arrlast(App->Displays).Razor;
+		RazorSetPosition(Razor, GetRazorCenterDisplayPosition(App, &arrlast(App->Displays)));
+
+		RazorWait(App, Razor, 1.0f, RazorMoveFinished);
 	}
 }
 
 void ApplicationUpdate(ShaverApplication* App, const GameTime* Time)
 {
+	DebugNextFrame();
+
+	for (int InterpolatorIndex = 0, InterpolatorCount = arrlen(App->Interpolators);
+		 InterpolatorIndex < InterpolatorCount;
+		 InterpolatorIndex++)
+	{
+		Interpolator* Interp = &App->Interpolators[InterpolatorIndex];
+		Interp->Time += Time->DeltaTimeF * Interp->TimeScale;
+
+		if (Interp->Time >= Interp->Duration) {
+			Interp->Time = Interp->Duration;
+			Interp->TimeScale = 0.0f;
+			Interp->Flags |= InterpolatorFlags_Destroy;
+			if (Interp->OnFinish) {
+				Interp->OnFinish(App, Interp);
+			}
+		}
+	}
+
+	for (int InterpolatorIndex = arrlen(App->Interpolators) - 1; InterpolatorIndex >= 0; InterpolatorIndex--) {
+		Interpolator* Interp = &App->Interpolators[InterpolatorIndex];
+		if ((Interp->Flags & InterpolatorFlags_Destroy) != 0) {
+			arrdelswap(App->Interpolators, InterpolatorIndex);
+		}
+		if (InterpolatorIndex == 0) {
+			DebugPrintf("INTERP: %0.3f/%0.3f", Interp->Time, Interp->Duration);
+		}
+	}
+
+	for (int ShaverIndex = 0; ShaverIndex < arrlen(App->Displays); ShaverIndex++) {
+		ShaverDisplay* Display = &App->Displays[ShaverIndex];
+		float32 Value = RazorEvaluatePosition(App, &Display->Razor);
+		if (ShaverIndex == 0) {
+			DebugPrintf("POS: %0.1f, %0.1f", Display->Razor.Position.X, Display->Razor.Position.Y);
+			DebugPrintf("START: %0.1f, %0.1f", Display->Razor.StartPosition.X, Display->Razor.StartPosition.Y);
+			DebugPrintf("TARGET: %0.1f, %0.1f", Display->Razor.TargetPosition.X, Display->Razor.TargetPosition.Y);
+			DebugPrintf("STATE: %s", RazorBehaviorNames[Display->Razor.Behavior]);
+			DebugPrintf("VALUE: %f", Value);
+		}
+	}
 }
 
 void ApplicationRender(ShaverApplication* App)
@@ -217,8 +482,31 @@ void ApplicationRender(ShaverApplication* App)
 		SDL_RectToFRect(&Display->Bounds, &DisplayBounds);
 		SDL_RenderTexture(Display->Renderer, Display->ScreenshotTexture, &DisplayBounds, NULL);
 
+		SDL_RenderTexture(
+			Display->Renderer,
+			Display->RazorTexture,
+			NULL,
+			&(SDL_FRect){Display->Razor.Position.X,
+						 Display->Razor.Position.Y,
+						 App->Razor.Image->w,
+						 App->Razor.Image->h});
+
+		if (ShaverIndex == 0) {
+			DebugDraw(Display->Renderer);
+		}
+
 		SDL_RenderPresent(Display->Renderer);
 	}
+}
+
+bool ApplicationIsRunning(ShaverApplication* App)
+{
+	return !App->RequestShutdown;
+}
+
+void ApplicationStopRunning(ShaverApplication* App)
+{
+	App->RequestShutdown = true;
 }
 
 bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
@@ -227,7 +515,134 @@ bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
 	switch (Event->type) {
 		case SDL_EVENT_QUIT:
 		// case SDL_EVENT_MOUSE_MOTION:
-		case SDL_EVENT_KEY_DOWN: Result = true; break;
+		case SDL_EVENT_KEY_DOWN:
+#ifndef _DEBUG
+			if (Event->key.scancode == SDL_SCANCODE_ESCAPE) {
+				Result = true;
+			}
+#else
+			Result = true;
+#endif
+			break;
 	}
 	return Result;
+}
+
+int64 CreateInterpolator(
+	ShaverApplication* App,
+	InterpolatorFunction Func,
+	float32 Start,
+	float32 Final,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish)
+{
+	int64 Id = App->NextInterpolatorId++;
+
+	arrput(
+		App->Interpolators,
+		((Interpolator){
+			.Id = Id,
+			.Function = Func,
+			.OnFinish = OnFinish,
+			.Flags = InterpolatorFlags_None,
+			.Start = Start,
+			.Final = Final,
+			.Duration = Duration,
+			.TimeScale = 1.0f,
+		}));
+
+	return Id;
+}
+
+Interpolator* GetInterpolator(const ShaverApplication* App, int64 Id)
+{
+	for (int Index = 0; Index < arrlen(App->Interpolators); Index++) {
+		Interpolator* Interp = &App->Interpolators[Index];
+		if (Interp->Id == Id) {
+			return Interp;
+		}
+	}
+
+	return NULL;
+}
+
+float32 EvalInterpolator(Interpolator* Interp)
+{
+	if (Interp == NULL) {
+		return 1.0f;
+	}
+
+	return Interp->Function(Interp->Start, Interp->Final, Interp->Time, Interp->Duration);
+}
+
+void RazorSetPosition(RazorState* Razor, Vec2 Position)
+{
+	Razor->Position = Position;
+	Razor->StartPosition = Position;
+	Razor->TargetPosition = Position;
+}
+
+void RazorWait(ShaverApplication* App, RazorState* Razor, float32 Duration, InterpolatorOnFinish OnFinish)
+{
+	Razor->StartPosition = Razor->Position;
+	Razor->TargetPosition = Razor->Position;
+	Razor->InterpolatorId = CreateInterpolator(App, InterpFuncLinear, 0.0f, 1.0f, Duration, OnFinish);
+}
+
+void RazorMoveTo(
+	ShaverApplication* App,
+	RazorState* Razor,
+	Vec2 TargetPosition,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish)
+{
+	Razor->StartPosition = Razor->Position;
+	Razor->TargetPosition = TargetPosition;
+	Razor->InterpolatorId = CreateInterpolator(App, InterpFuncLinear, 0.0f, 1.0f, Duration, OnFinish);
+}
+
+void RazorEaseTo(
+	ShaverApplication* App,
+	RazorState* Razor,
+	Vec2 TargetPosition,
+	float32 Duration,
+	InterpolatorOnFinish OnFinish)
+{
+	Razor->StartPosition = Razor->Position;
+	Razor->TargetPosition = TargetPosition;
+	Razor->InterpolatorId = CreateInterpolator(App, InterpFuncEaseInOutQuad, 0.0f, 1.0f, Duration, OnFinish);
+}
+
+Vec2 GetRazorCenterDisplayPosition(const ShaverApplication* App, const ShaverDisplay* Display)
+{
+	return V2(Display->WindowWidth / 2 - App->Razor.Image->w / 2, Display->WindowHeight / 2 - App->Razor.Image->h / 2);
+}
+
+float32 RazorEvaluatePosition(const ShaverApplication* App, RazorState* Razor)
+{
+	Interpolator* Interp = GetInterpolator(App, Razor->InterpolatorId);
+	float32 Value = EvalInterpolator(Interp);
+	Razor->Position = Lerp(Razor->StartPosition, Razor->TargetPosition, Value);
+	return Value;
+}
+
+bool LoadImage(const char* FileName, SDL_Surface** OutSurface)
+{
+	*OutSurface = NULL;
+
+	int Width, Height, Channels;
+	stbi_uc* ImageData = stbi_load(FileName, &Width, &Height, &Channels, 4);
+
+	if (!ImageData) {
+		return false;
+	}
+
+	SDL_Surface* Surface = SDL_CreateSurfaceFrom(Width, Height, SDL_PIXELFORMAT_RGBA32, ImageData, Width * 4);
+
+	if (!Surface) {
+		return false;
+	}
+
+	*OutSurface = Surface;
+	return true;
 }
