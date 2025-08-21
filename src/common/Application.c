@@ -35,29 +35,6 @@ float32 InterpFuncEaseInOutQuad(float32 A, float32 B, float32 Time, float32 Dura
 	}
 }
 
-// f32 tween_linear(f32 t, f32 i, f32 f, f32 d) {
-//     return (f - i) * t / d + i;
-// }
-
-// f32 tween_ease_in_quad(f32 t, f32 i, f32 f, f32 d) {
-//     t /= d;
-//     return (f - i) * t * t + i;
-// }
-
-// f32 tween_ease_out_quad(f32 t, f32 i, f32 f, f32 d) {
-//     t /= d;
-//     return -(f - i) * (t - 2.f) + i;
-// }
-
-// f32 tween_ease_in_out_quad(f32 t, f32 i, f32 f, f32 d) {
-//     t /= (d / 2.f);
-//     if (t < 1.f) {
-//         return (f - i) / 2.f * t * t + i;
-//     }
-//     t -= 1.f;
-//     return -(f - i) / 2 * (t * (t - 2) - 1) + i;
-// }
-
 enum InterpolatorFlags {
 	InterpolatorFlags_None = 0,
 	InterpolatorFlags_Destroy = 1 << 0,
@@ -116,6 +93,7 @@ typedef struct ShaverDisplay {
 	SDL_Rect Bounds;
 	SDL_Texture* ScreenshotTexture;
 	SDL_Texture* RazorTexture;
+	SDL_Texture* ShavedTexture;
 	RazorState Razor;
 	int32 WindowWidth;
 	int32 WindowHeight;
@@ -409,14 +387,20 @@ void ApplicationCreateDisplays(ShaverApplication* App)
 				.Bounds = Bounds,
 				.ScreenshotTexture = SDL_CreateTextureFromSurface(Renderer, App->Screenshot),
 				.RazorTexture = SDL_CreateTextureFromSurface(Renderer, App->Razor.Image),
+				.ShavedTexture = SDL_CreateTexture(
+					Renderer,
+					SDL_PIXELFORMAT_RGBA32,
+					SDL_TEXTUREACCESS_STREAMING,
+					WindowWidth,
+					WindowHeight),
 				.WindowWidth = WindowWidth,
 				.WindowHeight = WindowHeight,
 			}));
 
-		RazorState* Razor = &arrlast(App->Displays).Razor;
-		RazorSetPosition(Razor, GetRazorCenterDisplayPosition(App, &arrlast(App->Displays)));
+		ShaverDisplay* Display = &arrlast(App->Displays);
 
-		RazorWait(App, Razor, 1.0f, RazorMoveFinished);
+		RazorSetPosition(&Display->Razor, GetRazorCenterDisplayPosition(App, Display));
+		RazorWait(App, &Display->Razor, 1.0f, RazorMoveFinished);
 	}
 }
 
@@ -424,12 +408,14 @@ void ApplicationUpdate(ShaverApplication* App, const GameTime* Time)
 {
 	DebugNextFrame();
 
+	const float32 TimeScale = 3.0f;
+
 	for (int InterpolatorIndex = 0, InterpolatorCount = arrlen(App->Interpolators);
 		 InterpolatorIndex < InterpolatorCount;
 		 InterpolatorIndex++)
 	{
 		Interpolator* Interp = &App->Interpolators[InterpolatorIndex];
-		Interp->Time += Time->DeltaTimeF * Interp->TimeScale;
+		Interp->Time += Time->DeltaTimeF * Interp->TimeScale * TimeScale;
 
 		if (Interp->Time >= Interp->Duration) {
 			Interp->Time = Interp->Duration;
@@ -453,7 +439,28 @@ void ApplicationUpdate(ShaverApplication* App, const GameTime* Time)
 
 	for (int ShaverIndex = 0; ShaverIndex < arrlen(App->Displays); ShaverIndex++) {
 		ShaverDisplay* Display = &App->Displays[ShaverIndex];
+
+		if (Display->Razor.Behavior == RazorBehavior_Shave) {
+			SDL_Surface* ShavedSurface;
+			SDL_LockTextureToSurface(Display->ShavedTexture, NULL, &ShavedSurface);
+
+			SDL_FillSurfaceRect(
+				ShavedSurface,
+				&(SDL_Rect){0, 0, Display->Razor.ShaveIndex * App->Razor.BladeBounds.w, Display->WindowHeight},
+				0xFF000000);
+			int ShaveX = App->Razor.BladeBounds.x + (int)Display->Razor.Position.X;
+			int ShaveY = App->Razor.BladeBounds.y + (int)Display->Razor.Position.Y;
+			SDL_Rect Bounds = App->Razor.BladeBounds;
+			Bounds.x += (int)Display->Razor.Position.X;
+			Bounds.y = 0;
+			Bounds.h = (int)Display->Razor.Position.Y + Bounds.h;
+			SDL_FillSurfaceRect(ShavedSurface, &Bounds, 0xff000000);
+
+			SDL_UnlockTexture(Display->ShavedTexture);
+		}
+
 		float32 Value = RazorEvaluatePosition(App, &Display->Razor);
+
 		if (ShaverIndex == 0) {
 			DebugPrintf("POS: %0.1f, %0.1f", Display->Razor.Position.X, Display->Razor.Position.Y);
 			DebugPrintf("START: %0.1f, %0.1f", Display->Razor.StartPosition.X, Display->Razor.StartPosition.Y);
@@ -481,6 +488,7 @@ void ApplicationRender(ShaverApplication* App)
 		SDL_FRect DisplayBounds;
 		SDL_RectToFRect(&Display->Bounds, &DisplayBounds);
 		SDL_RenderTexture(Display->Renderer, Display->ScreenshotTexture, &DisplayBounds, NULL);
+		SDL_RenderTexture(Display->Renderer, Display->ShavedTexture, NULL, NULL);
 
 		SDL_RenderTexture(
 			Display->Renderer,
@@ -491,9 +499,11 @@ void ApplicationRender(ShaverApplication* App)
 						 App->Razor.Image->w,
 						 App->Razor.Image->h});
 
+#ifdef _DEBUG
 		if (ShaverIndex == 0) {
 			DebugDraw(Display->Renderer);
 		}
+#endif
 
 		SDL_RenderPresent(Display->Renderer);
 	}
