@@ -5,3 +5,5 @@ log.txt
 /*.dll
 vcpkg_installed/
 __pycache__/
+screenshaver/
+screenshaver.zip
