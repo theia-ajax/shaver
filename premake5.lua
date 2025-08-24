@@ -4,13 +4,14 @@ workspace "screenshaver"
 	location "bin"
 	files { "*.natvis" }
 	includedirs { "include" }
+	buildoptions { "--embed-dir=../../assets" }
 
 filter "platforms:linux64"
 	system "Linux"
 	defines { "__LINUX__" }
 	architecture "x86_64"
 	toolset "gcc"
-	buildoptions {"-Werror", "-ftrack-macro-expansion=0"}
+	buildoptions {"-Werror", "-ftrack-macro-expansion=0" }
 	libdirs { "vcpkg_installed/x64-linux/lib" }
 	includedirs { "vcpkg_installed/x64-linux/include" }
 	
@@ -49,7 +50,7 @@ filter "configurations:release"
 project "screenshaver"
 	kind "WindowedApp"
 	language "C"
-	cdialect "gnu17"
+	cdialect "gnu23"
 	toolset "gcc"
 	location "bin/screenshaver"
 	files { 
@@ -58,7 +59,6 @@ project "screenshaver"
 		"src/common/**.inl",
 		"src/main_%{cfg.platform:lower()}.c",
 	}
-	includedirs { "include" }
 	debugdir "."
 	defines { "LOGGING_WRITE_TO_FILE" }
 

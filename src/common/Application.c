@@ -81,6 +81,7 @@ typedef struct RazorState {
 	Vec2 StartPosition;
 	Vec2 TargetPosition;
 	Vec2 Position;
+	Vec2 LastPosition;
 	int32 Behavior;
 	int32 ShaveIndex;
 } RazorState;
@@ -94,6 +95,7 @@ typedef struct ShaverDisplay {
 	SDL_Texture* ScreenshotTexture;
 	SDL_Texture* RazorTexture;
 	SDL_Texture* ShavedTexture;
+	SDL_Surface* ShavedSurface;
 	RazorState Razor;
 	int32 WindowWidth;
 	int32 WindowHeight;
@@ -101,11 +103,15 @@ typedef struct ShaverDisplay {
 
 typedef struct ShaverApplication {
 	ShaverDisplay* Displays;
+	uint32 Colors[16];
 	SDL_Surface* Screenshot;
 	Interpolator* Interpolators;
+	SDL_Surface* Pattern;
+	SDL_Palette* PatternPalette;
 	int64 NextInterpolatorId;
 	ShaverRazor Razor;
 	bool RequestShutdown;
+	bool EnableDebugDraw;
 	bool EnableConfusionPrevention; // When true make it obvious that the screen saver is running so I don't get
 									// confused while deving
 } ShaverApplication;
@@ -128,6 +134,7 @@ void ApplicationRender(ShaverApplication* App);
 bool ApplicationIsRunning(ShaverApplication* App);
 void ApplicationStopRunning(ShaverApplication* App);
 bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event);
+void ApplicationDebugKeyDown(ShaverApplication* App, SDL_Scancode scancode);
 
 int64 CreateInterpolator(
 	ShaverApplication* App,
@@ -153,10 +160,12 @@ void RazorEaseTo(
 	Vec2 TargetPosition,
 	float32 Duration,
 	InterpolatorOnFinish OnFinish);
-Vec2 GetRazorCenterDisplayPosition(const ShaverApplication* App, const ShaverDisplay* Display);
+SDL_Rect PositionToRazorShaveBounds(const ShaverRazor* Razor, Vec2 Position);
+Vec2 GetRazorCenterDisplayPosition(const ShaverRazor* Razor, const ShaverDisplay* Display);
 float32 RazorEvaluatePosition(const ShaverApplication* App, RazorState* Razor);
 
 bool LoadImage(const char* FileName, SDL_Surface** OutSurface);
+bool LoadImageFromMemory(const void* Data, size_t Bytes, SDL_Surface** OutSurface);
 
 Application* ApplicationInitialize(const ApplicationConfig* Config)
 {
@@ -182,17 +191,49 @@ Application* ApplicationInitialize(const ApplicationConfig* Config)
 	ShaverApplication* App = ApplicationCreate();
 	ApplicationTakeDesktopScreenshot(&App->Screenshot);
 
-	if (LoadImage("assets/razor.png", &App->Razor.Image)) {
-		App->Razor.BladeBounds = (SDL_Rect){0, 0, 256, 96};
-	} else {
-		LogError("Failed to load razor image.");
-		ApplicationStopRunning(App);
+	{
+		// clang-format off
+		static const char RazorImageData[] = {
+			#embed "razor.png"
+		};
+		// clang-format on
+		LoadImageFromMemory(RazorImageData, sizeof(RazorImageData), &App->Razor.Image);
+		App->Razor.BladeBounds = (SDL_Rect){0, 0, 118, 29};
+	}
+
+	{
+		static const char Pattern[] = {
+			0x0F,
+			0x0F,
+			0x0F,
+			0x0F,
+			0xF0,
+			0xF0,
+			0xF0,
+			0xF0,
+		};
+		SDL_CreateSurfaceFrom(8, 8, SDL_PIXELFORMAT_INDEX1LSB, (void*)Pattern, 1);
+		// clang-format off
+		static const char PatternImageData[] = {
+			#embed "pattern_00.png"
+		};
+		// clang-format on
+		LoadImageFromMemory(PatternImageData, sizeof(PatternImageData), &App->Pattern);
+		SDL_Color Colors[] = {
+			(SDL_Color){0, 255, 255, 255},
+			(SDL_Color){0, 0, 255, 255},
+		};
+		SDL_SetPaletteColors(SDL_GetSurfacePalette(App->Pattern), Colors, 0, 2);
 	}
 
 	ApplicationCreateDisplays(App);
 
+	App->Colors[0] = SDL_MapSurfaceRGBA(App->Razor.Image, 0, 0, 255, 255);
+	App->Colors[1] = SDL_MapSurfaceRGBA(App->Razor.Image, 0, 255, 255, 255);
+
 #ifdef _DEBUG
 	App->EnableConfusionPrevention = true;
+	App->EnableDebugDraw = true;
 #endif
 
 	DebugInitialize(&(DebugConfig){
@@ -233,6 +274,11 @@ void ApplicationRun(Application* App)
 			if (ApplicationEventShouldExit(_App, &Event)) {
 				ApplicationStopRunning(_App);
 			}
+#ifdef _DEBUG
+			if (Event.type == SDL_EVENT_KEY_DOWN) {
+				ApplicationDebugKeyDown(_App, Event.key.scancode);
+			}
+#endif
 		}
 
 		DeltaTicks = stm_laptime(&NowTicks);
@@ -324,7 +370,12 @@ void RazorMoveFinished(ShaverApplication* App, Interpolator* Interp)
 
 		case RazorBehavior_WaitToShave:
 			Razor->Behavior = RazorBehavior_Shave;
-			RazorMoveTo(App, Razor, V2(Razor->Position.X, RazorDisplay->WindowHeight), ShaveDuration, RazorMoveFinished);
+			RazorMoveTo(
+				App,
+				Razor,
+				V2(Razor->Position.X, RazorDisplay->WindowHeight + 32),
+				ShaveDuration,
+				RazorMoveFinished);
 			break;
 
 		case RazorBehavior_Shave:
@@ -340,7 +391,7 @@ void RazorMoveFinished(ShaverApplication* App, Interpolator* Interp)
 				Razor->Behavior = RazorBehavior_Reposition;
 				RazorEaseTo(App, Razor, V2(NextX, 0), RepositionDuration, RazorMoveFinished);
 			} else {
-				RazorEaseTo(App, Razor, GetRazorCenterDisplayPosition(App, RazorDisplay), 1.0f, NULL);
+				RazorEaseTo(App, Razor, GetRazorCenterDisplayPosition(&App->Razor, RazorDisplay), 1.0f, NULL);
 			}
 			break;
 	}
@@ -393,13 +444,14 @@ void ApplicationCreateDisplays(ShaverApplication* App)
 					SDL_TEXTUREACCESS_STREAMING,
 					WindowWidth,
 					WindowHeight),
+				.ShavedSurface = SDL_CreateSurface(WindowWidth, WindowHeight, SDL_PIXELFORMAT_RGBA32),
 				.WindowWidth = WindowWidth,
 				.WindowHeight = WindowHeight,
 			}));
 
 		ShaverDisplay* Display = &arrlast(App->Displays);
 
-		RazorSetPosition(&Display->Razor, GetRazorCenterDisplayPosition(App, Display));
+		RazorSetPosition(&Display->Razor, GetRazorCenterDisplayPosition(&App->Razor, Display));
 		RazorWait(App, &Display->Razor, 1.0f, RazorMoveFinished);
 	}
 }
@@ -440,26 +492,54 @@ void ApplicationUpdate(ShaverApplication* App, const GameTime* Time)
 	for (int ShaverIndex = 0; ShaverIndex < arrlen(App->Displays); ShaverIndex++) {
 		ShaverDisplay* Display = &App->Displays[ShaverIndex];
 
+		float32 Value = RazorEvaluatePosition(App, &Display->Razor);
+
 		if (Display->Razor.Behavior == RazorBehavior_Shave) {
+			// int ShaveX = App->Razor.BladeBounds.x + (int)Display->Razor.Position.X;
+			// int ShaveY = App->Razor.BladeBounds.y + (int)Display->Razor.Position.Y;
+			// SDL_Rect Bounds = App->Razor.BladeBounds;
+			// Bounds.x += (int)Display->Razor.Position.X;
+			// Bounds.y = 0;
+			// Bounds.h = (int)Display->Razor.Position.Y + Bounds.h;
+			// SDL_FillSurfaceRect(
+			// 	Display->ShavedSurface,
+			// 	&Bounds,
+			// 	SDL_MapRGB(SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32), NULL, 0, 255, 255));
+
+			SDL_Rect LastShaveBounds = PositionToRazorShaveBounds(&App->Razor, Display->Razor.LastPosition);
+			SDL_Rect ShaveBounds = PositionToRazorShaveBounds(&App->Razor, Display->Razor.Position);
+
+			for (int ShaveY = LastShaveBounds.y; ShaveY < MIN(ShaveBounds.y + ShaveBounds.h, Display->ShavedSurface->h);
+				 ShaveY += App->Pattern->h)
+			{
+				// SDL_FillSurfaceRect(
+				// 	Display->ShavedSurface,
+				// 	&(SDL_Rect){ShaveBounds.x, ShaveY, ShaveBounds.w, 1},
+				// 	SDL_MapRGB(
+				// 		SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32),
+				// 		NULL,
+				// 		0,
+				// 		(ShaveY % 2 == 0) ? 255 : 0,
+				// 		255));
+				for (int ShaveX = ShaveBounds.x; ShaveX < MIN(ShaveBounds.x + ShaveBounds.w, Display->ShavedSurface->w);
+					 ShaveX += App->Pattern->w)
+				{
+					SDL_BlitSurface(
+						App->Pattern,
+						NULL,
+						Display->ShavedSurface,
+						&(SDL_Rect){ShaveX, ShaveY, App->Pattern->w, App->Pattern->h});
+				}
+			}
+
 			SDL_Surface* ShavedSurface;
 			SDL_LockTextureToSurface(Display->ShavedTexture, NULL, &ShavedSurface);
-
-			SDL_FillSurfaceRect(
-				ShavedSurface,
-				&(SDL_Rect){0, 0, Display->Razor.ShaveIndex * App->Razor.BladeBounds.w, Display->WindowHeight},
-				0xFF000000);
-			int ShaveX = App->Razor.BladeBounds.x + (int)Display->Razor.Position.X;
-			int ShaveY = App->Razor.BladeBounds.y + (int)Display->Razor.Position.Y;
-			SDL_Rect Bounds = App->Razor.BladeBounds;
-			Bounds.x += (int)Display->Razor.Position.X;
-			Bounds.y = 0;
-			Bounds.h = (int)Display->Razor.Position.Y + Bounds.h;
-			SDL_FillSurfaceRect(ShavedSurface, &Bounds, 0xff000000);
-
+			SDL_memcpy(
+				ShavedSurface->pixels,
+				Display->ShavedSurface->pixels,
+				Display->ShavedSurface->pitch * Display->ShavedSurface->h);
 			SDL_UnlockTexture(Display->ShavedTexture);
 		}
-
-		float32 Value = RazorEvaluatePosition(App, &Display->Razor);
 
 		if (ShaverIndex == 0) {
 			DebugPrintf("POS: %0.1f, %0.1f", Display->Razor.Position.X, Display->Razor.Position.Y);
@@ -500,8 +580,10 @@ void ApplicationRender(ShaverApplication* App)
 						 App->Razor.Image->h});
 
 #ifdef _DEBUG
-		if (ShaverIndex == 0) {
-			DebugDraw(Display->Renderer);
+		if (App->EnableDebugDraw) {
+			if (ShaverIndex == 0) {
+				DebugDraw(Display->Renderer);
+			}
 		}
 #endif
 
@@ -526,7 +608,7 @@ bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
 		case SDL_EVENT_QUIT:
 		// case SDL_EVENT_MOUSE_MOTION:
 		case SDL_EVENT_KEY_DOWN:
-#ifndef _DEBUG
+#ifdef _DEBUG
 			if (Event->key.scancode == SDL_SCANCODE_ESCAPE) {
 				Result = true;
 			}
@@ -536,6 +618,14 @@ bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
 			break;
 	}
 	return Result;
+}
+
+void ApplicationDebugKeyDown(ShaverApplication* App, SDL_Scancode scancode)
+{
+	switch (scancode) {
+		case SDL_SCANCODE_F1: TOGGLE(App->EnableDebugDraw); break;
+		default: break;
+	}
 }
 
 int64 CreateInterpolator(
@@ -623,15 +713,27 @@ void RazorEaseTo(
 	Razor->InterpolatorId = CreateInterpolator(App, InterpFuncEaseInOutQuad, 0.0f, 1.0f, Duration, OnFinish);
 }
 
-Vec2 GetRazorCenterDisplayPosition(const ShaverApplication* App, const ShaverDisplay* Display)
+SDL_Rect PositionToRazorShaveBounds(const ShaverRazor* Razor, Vec2 Position)
 {
-	return V2(Display->WindowWidth / 2 - App->Razor.Image->w / 2, Display->WindowHeight / 2 - App->Razor.Image->h / 2);
+	return (SDL_Rect){
+
+		.x = (int)round(Position.X) + Razor->BladeBounds.x,
+		.y = (int)round(Position.Y) + Razor->BladeBounds.y,
+		.w = Razor->BladeBounds.w,
+		.h = Razor->BladeBounds.h,
+	};
+}
+
+Vec2 GetRazorCenterDisplayPosition(const ShaverRazor* Razor, const ShaverDisplay* Display)
+{
+	return V2(Display->WindowWidth / 2 - Razor->Image->w / 2, Display->WindowHeight / 2 - Razor->Image->h / 2);
 }
 
 float32 RazorEvaluatePosition(const ShaverApplication* App, RazorState* Razor)
 {
 	Interpolator* Interp = GetInterpolator(App, Razor->InterpolatorId);
 	float32 Value = EvalInterpolator(Interp);
+	Razor->LastPosition = Razor->Position;
 	Razor->Position = Lerp(Razor->StartPosition, Razor->TargetPosition, Value);
 	return Value;
 }
@@ -642,6 +744,27 @@ bool LoadImage(const char* FileName, SDL_Surface** OutSurface)
 
 	int Width, Height, Channels;
 	stbi_uc* ImageData = stbi_load(FileName, &Width, &Height, &Channels, 4);
+
+	if (!ImageData) {
+		return false;
+	}
+
+	SDL_Surface* Surface = SDL_CreateSurfaceFrom(Width, Height, SDL_PIXELFORMAT_RGBA32, ImageData, Width * 4);
+
+	if (!Surface) {
+		return false;
+	}
+
+	*OutSurface = Surface;
+	return true;
+}
+
+bool LoadImageFromMemory(const void* Data, size_t Bytes, SDL_Surface** OutSurface)
+{
+	*OutSurface = NULL;
+
+	int Width, Height, Channels;
+	stbi_uc* ImageData = stbi_load_from_memory((stbi_uc*)Data, Bytes, &Width, &Height, &Channels, 4);
 
 	if (!ImageData) {
 		return false;

@@ -20,7 +20,7 @@ set ASSETSDIR_PKG="%PKGDIR%\%ASSETSDIR%"
 call .\build.bat release
 
 @copy %EXECUTABLE_SRC% %EXECUTABLE_PKG%
-@xcopy /S /Y %ASSETSDIR% %ASSETSDIR_PKG%
+@REM @xcopy /S /Y %ASSETSDIR% %ASSETSDIR_PKG%
 @xcopy /Y *.dll %PKGDIR%\.
 
 7z a %ARCHIVE% %PKGDIR%

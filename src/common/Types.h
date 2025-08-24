@@ -79,6 +79,8 @@ typedef double float64;
 #define ZERO_STRUCT(struct_ptr) ZERO(struct_ptr, sizeof(*(struct_ptr)))
 #define ZERO_ARRAY(array_ptr) ZERO(array_ptr, ARRAY_COUNT(array_ptr) * sizeof(*(array_ptr)))
 
+#define TOGGLE(b) ((b) = !(b))
+
 #define FixedArray(type, cap)                                                                                          \
 	struct {                                                                                                           \
 		type Data[cap];                                                                                                \
