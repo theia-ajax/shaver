@@ -114,6 +114,9 @@ typedef double float64;
 		HANDLE_INTERNAL_TYPE Value;                                                                                    \
 	} Type
 #define VALID_HANDLE(Handle) ((Handle).Value != NONE)
+#define HANDLE_EQ(A, B) ((A).Value == (B).Value)
+#define HANDLE_NEQ(A, B) ((A).Value != (B).Value)
+#define INVALID_HANDLE(Type) (Type){NONE}
 typedef HANDLE_INTERNAL_TYPE handint;
 
 #define UNIQUE_STATIC_NAME(x) CAT(CAT(x, _), __LINE__)

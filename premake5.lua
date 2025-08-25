@@ -60,7 +60,9 @@ project "screenshaver"
 		"src/main_%{cfg.platform:lower()}.c",
 	}
 	debugdir "."
-	defines { "LOGGING_WRITE_TO_FILE" }
+
+	filter {"configurations:debug"}
+		defines { "LOGGING_WRITE_TO_FILE" }
 
 	filter "platforms:linux64"
 		links { "SDL3", "m", "stdc++" }

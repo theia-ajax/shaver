@@ -6,9 +6,7 @@ set RUN="false"
 
 FOR %%A IN (%*) DO (
     IF "%%A"=="/r" (
-		echo !RUN!
 		set RUN="true"
-		echo !RUN!
 	) ELSE (
 		set "CONFIG=%1"
 	)
