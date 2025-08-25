@@ -318,8 +318,6 @@ void ApplicationCreateDisplays(ShaverApplication* App)
 
 		RazorSetPosition(&NewDisplay->Razor, GetRazorCenterDisplayPosition((Display*)NewDisplay, &App->RazorConfig));
 		RazorWait(&NewDisplay->Razor, 1.0f, RazorMoveFinished);
-
-		
 	}
 }
 
@@ -429,16 +427,23 @@ bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
 	bool Result = false;
 	switch (Event->type) {
 		case SDL_EVENT_QUIT:
-		// case SDL_EVENT_MOUSE_MOTION:
-		case SDL_EVENT_KEY_DOWN:
+			// case SDL_EVENT_MOUSE_MOTION:
 #ifdef _DEBUG
+		case SDL_EVENT_KEY_DOWN:
 			if (Event->key.scancode == SDL_SCANCODE_ESCAPE) {
 				Result = true;
 			}
-#else
-			Result = true;
-#endif
 			break;
+#else
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		case SDL_EVENT_MOUSE_WHEEL:
+		case SDL_EVENT_KEY_DOWN: Result = true; break;
+		case SDL_EVENT_MOUSE_MOTION:
+			if (Len(V2(Event->motion.xrel, Event->motion.yrel)) > 4.0f) {
+				Result = true;
+			}
+			break;
+#endif
 	}
 	return Result;
 }
