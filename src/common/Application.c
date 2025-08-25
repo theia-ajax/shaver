@@ -254,6 +254,14 @@ ShaverApplication* ApplicationCreate()
 
 void ApplicationDestroy(ShaverApplication* App)
 {
+	for (int Index = 0, Count = arrlen(App->Patterns); Index < Count; Index++)
+	{
+		SDL_DestroySurface(App->Patterns[Index]);
+	}
+	arrfree(App->Patterns);
+
+	SDL_DestroySurface(App->RazorConfig.Image);
+
 	arrfree(App->Displays);
 	SDL_free(App);
 }
@@ -427,7 +435,6 @@ bool ApplicationEventShouldExit(ShaverApplication* App, const SDL_Event* Event)
 	bool Result = false;
 	switch (Event->type) {
 		case SDL_EVENT_QUIT:
-			// case SDL_EVENT_MOUSE_MOTION:
 #ifdef _DEBUG
 		case SDL_EVENT_KEY_DOWN:
 			if (Event->key.scancode == SDL_SCANCODE_ESCAPE) {
