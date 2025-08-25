@@ -24,3 +24,5 @@ call .\build.bat release
 @xcopy /Y *.dll %PKGDIR%\.
 
 7z a %ARCHIVE% %PKGDIR%
+
+@RD /S /Q %PKGDIR%
