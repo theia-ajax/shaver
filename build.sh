@@ -1,6 +1,6 @@
 #!/usr/bin/sh
 
-target='comet'
+target='screenshaver'
 run=false
 platform='linux64'
 config='debug'
